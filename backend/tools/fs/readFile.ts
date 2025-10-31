@@ -14,4 +14,5 @@ export default {
 			filePath: { type: String, description: "File Path to search and manipulate." },
 		},
 	},
-} as Tool;
+	execute: readFile,
+} as CTool;
