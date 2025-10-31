@@ -14,4 +14,5 @@ export default {
 			filePath: { type: String, description: "Glob Path to search via glob pattern." },
 		},
 	},
-} as Tool;
+	execute: glob,
+} as CTool;

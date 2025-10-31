@@ -46,26 +46,16 @@ const fetch_joke = async () => {
 };
 
 const tools: { [x: string]: any } = {
-	fetch_joke: fetch_joke,
+	// fetch_joke: fetch_joke,
 };
 
 const message_histories: {
 	[x: string]: Message[];
 } = {};
 
-const tool_call_functions: Tool[] = [];
-await globbySync("./tools/**/*").forEach((toolPath) => {
-	try {
-		delete require.cache[require.resolve(toolPath)];
-		delete import.meta.require.cache[import.meta.require.resolve(toolPath)];
-		const tool:Tool = require(`${toolPath}`) as Tool;
-		tool_call_functions.push(tool);
-	} catch (error) {
-		console.log("There was some error deelting imported cache");
-	}
-});
+const tool_call_functions: CTool[] = [];
 
-const chat_tools = [
+const chat_tools: CTool[] = [
 	{
 		type: "function",
 		function: {
@@ -75,7 +65,21 @@ const chat_tools = [
 		},
 	},
 ];
-
+await globbySync("./tools/**/*").forEach((toolPath) => {
+	try {
+		delete require.cache[require.resolve(toolPath)];
+		delete import.meta.require.cache[import.meta.require.resolve(toolPath)];
+		const { default: tool }: { default: CTool } = require(`${toolPath}`) as { default: CTool };
+		chat_tools.push(tool);
+	} catch (error) {
+		console.log("There was some error deelting imported cache");
+	}
+});
+chat_tools.forEach((tool_call_func) => {
+	console.log(tool_call_func);
+	tools[`${tool_call_func?.function?.name}`] = tool_call_func?.execute;
+});
+console.log(tools);
 // Helper to load system prompt safely
 let systemPrompt = "You are a helpful assistant."; // Default fallback
 try {
