@@ -1,8 +1,12 @@
 import fs from "fs-extra";
 import type { Tool } from "ollama";
-const glob = async (globPattern: string) => {
-	const glob_contents = await fs.globSync(globPattern);
-	return glob_contents;
+const glob = async (params: { globPattern: string }) => {
+	try {
+		const glob_contents = await fs.globSync(params.globPattern);
+		return glob_contents;
+	} catch (error) {
+		return "These was an error executing that.";
+	}
 };
 export default {
 	type: "function",
@@ -11,7 +15,9 @@ export default {
 		description: "Glob all similar files with similar names.",
 		parameters: {
 			type: "object",
-			filePath: { type: String, description: "Glob Path to search via glob pattern." },
+			properties: {
+				filePath: { type: "string", description: "Glob Path to search via glob pattern." },
+			},
 		},
 	},
 	execute: glob,
