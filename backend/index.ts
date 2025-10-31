@@ -1,10 +1,11 @@
-import ollama, { type ChatResponse, type Message } from "ollama";
+import ollama, { type ChatResponse, type Message, type ChatRequest, type Tool } from "ollama";
 import { cors } from "hono/cors";
 import { Hono } from "hono";
 import { prettyJSON } from "hono/pretty-json";
 import * as uuid from "uuid";
 import { getCookie, setCookie } from "hono/cookie";
 import moment from "moment";
+import { globby, globbySync } from "globby";
 // import { Database } from "bun:sqlite";
 import fs from "fs-extra";
 
@@ -52,6 +53,18 @@ const message_histories: {
 	[x: string]: Message[];
 } = {};
 
+const tool_call_functions: Tool[] = [];
+await globbySync("./tools/**/*").forEach((toolPath) => {
+	try {
+		delete require.cache[require.resolve(toolPath)];
+		delete import.meta.require.cache[import.meta.require.resolve(toolPath)];
+		const tool:Tool = require(`${toolPath}`) as Tool;
+		tool_call_functions.push(tool);
+	} catch (error) {
+		console.log("There was some error deelting imported cache");
+	}
+});
+
 const chat_tools = [
 	{
 		type: "function",
@@ -80,12 +93,14 @@ app.post("/chat", async (c) => {
 		const body = await c.req.json();
 
 		let session_id = getCookie(c, "session_id");
+		console.log(session_id);
 		if (!session_id) {
 			const id = uuid.v7();
 			// Expires 1 day from now
 			setCookie(c, "session_id", id, { expires: moment().add("1d").toDate(), httpOnly: true, path: "/" });
 			session_id = id;
 		}
+		console.log(session_id);
 
 		if (!message_histories[session_id]) {
 			message_histories[session_id] = [
@@ -125,7 +140,7 @@ app.post("/chat", async (c) => {
 				response = await ollama.chat({
 					model: "gpt-oss:120b-cloud",
 					stream: false,
-					think:false,
+					think: false,
 					tools: chat_tools,
 					messages: message_histories[session_id],
 				});
