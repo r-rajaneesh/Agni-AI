@@ -9,6 +9,9 @@ export default {
 	function: {
 		name: "readFile",
 		description: "Read contents of file.",
-		parameters: { filePath: { type: String, description: "File Path to search and manipulate." } },
+		parameters: {
+			type: "object",
+			filePath: { type: String, description: "File Path to search and manipulate." },
+		},
 	},
 } as Tool;
