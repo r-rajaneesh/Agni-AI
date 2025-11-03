@@ -18,6 +18,7 @@ export default {
 			properties: {
 				dirPath: { type: "string", description: "Directory Path to search. (Defaults ./)" },
 			},
+			required: ["dirPath"],
 		},
 	},
 	execute: readDir,

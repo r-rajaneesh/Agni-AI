@@ -18,6 +18,7 @@ export default {
 			properties: {
 				filePath: { type: "string", description: "File Path to search and manipulate." },
 			},
+			required: ["filePath"],
 		},
 	},
 	execute: readFile,

@@ -6,65 +6,35 @@ import * as uuid from "uuid";
 import { getCookie, setCookie } from "hono/cookie";
 import moment from "moment";
 import { globby, globbySync } from "globby";
+import { Server as Engine } from "@socket.io/bun-engine";
+import { Server } from "socket.io";
 // import { Database } from "bun:sqlite";
 import fs from "fs-extra";
+import helmet from "helmet";
+import chat from "./socket/chat.ts";
+
+const io = new Server();
+
+const engine = new Engine();
+
+io.bind(engine);
 
 const app = new Hono();
-app.use(cors());
-app.use(prettyJSON());
 
+const { websocket } = engine.handler();
+app.use(cors());
+// app.use(helmet())
+app.use(prettyJSON());
 // const db = new Database("./database/context.sqlite")
 // db.query(`CREATE TABLE users (id INT PRIMARY KEY, session_id TEXT)`).run();
 // db.query(`CREATE TABLE context (id TEXT, ctx BLOB, FORIEGN KEY (id) REFERENCES users(id))`).run();
 // db.query(`CREATE TABLE history (id TEXT, messages BLOB, FORIEGN KEY (id) REFERENCES users(id))`).run();
 
-const fetch_joke = async () => {
-	try {
-		const jokeResponse = await fetch("https://icanhazdadjoke.com/", {
-			method: "GET",
-			headers: {
-				Accept: "application/json",
-			},
-		});
-
-		if (!jokeResponse.ok) {
-			console.error("Failed to fetch joke:", jokeResponse.statusText);
-			return { error: "Failed to fetch joke", status: jokeResponse.status };
-		}
-
-		const jokeData = await jokeResponse.json();
-
-		// console.log("JOKEE", jokeData);
-		return jokeData;
-	} catch (error) {
-		console.error("Error in fetch_joke:", error);
-		if (error instanceof SyntaxError) {
-			return { error: "Failed to parse JSON response from joke API" };
-		}
-		return { error: "Unknown error fetching joke" };
-	}
-};
-
-const tools: { [x: string]: any } = {
-	// fetch_joke: fetch_joke,
-};
-
-const message_histories: {
+const message_history: {
 	[x: string]: Message[];
 } = {};
-
-const tool_call_functions: CTool[] = [];
-
-const chat_tools: CTool[] = [
-	{
-		type: "function",
-		function: {
-			name: "fetch_joke",
-			description: "Fetches the jokes from https://iconhazdadjoke.com",
-			parameters: {}, // Parameters are optional if there are none
-		},
-	},
-];
+const tools: { [x: string]: any } = {};
+const chat_tools: CTool[] = [];
 await globbySync("./tools/**/*").forEach((toolPath) => {
 	try {
 		delete require.cache[require.resolve(toolPath)];
@@ -76,14 +46,15 @@ await globbySync("./tools/**/*").forEach((toolPath) => {
 	}
 });
 chat_tools.forEach((tool_call_func) => {
-	console.log(tool_call_func);
+	// console.log(tool_call_func);
 	tools[`${tool_call_func?.function?.name}`] = tool_call_func?.execute;
 });
-console.log(tools);
+
+// console.log(tools);
 // Helper to load system prompt safely
-let systemPrompt = "You are a helpful assistant."; // Default fallback
+let system_prompt = "You are a helpful assistant."; // Default fallback
 try {
-	systemPrompt = fs.readFileSync("./systemprompt.md", "utf-8");
+	system_prompt = fs.readFileSync("./systemprompt.md", "utf-8");
 } catch (e) {
 	console.warn("Warning: systemprompt.md not found. Using default prompt.");
 }
@@ -97,76 +68,53 @@ app.post("/chat", async (c) => {
 		const body = await c.req.json();
 
 		let session_id = getCookie(c, "session_id");
-		console.log(session_id);
+		// console.log(session_id);
 		if (!session_id) {
 			const id = uuid.v7();
 			// Expires 1 day from now
 			setCookie(c, "session_id", id, { expires: moment().add("1d").toDate(), httpOnly: true, path: "/" });
 			session_id = id;
 		}
-		console.log(session_id);
+		// console.log(session_id);
 
-		if (!message_histories[session_id]) {
-			message_histories[session_id] = [
-				{
-					role: "system",
-					content: systemPrompt,
-				},
-			];
-		}
-
-		message_histories[session_id]?.push({
-			role: "user",
-			content: body["message"],
+		const response = await chat({
+			message: body["message"],
+			chat_tools,
+			message_history,
+			session_id,
+			system_prompt,
+			tools,
 		});
-
-		let response: ChatResponse = await ollama.chat({
-			model: "gpt-oss:120b-cloud",
-			stream: false,
-			think: false,
-			tools: chat_tools,
-			messages: message_histories[session_id],
-		});
-		console.log(JSON.stringify(response, null, 2));
-		message_histories[session_id]?.push(response.message);
-		while (response.message.tool_calls) {
-			for (const toolcall of response.message.tool_calls) {
-				console.log(`Executing tool: ${toolcall.function.name}`);
-
-				const toolop = (await tools[toolcall.function.name](toolcall.function.arguments)) as any;
-
-				message_histories[session_id]?.push({
-					role: "tool",
-					tool_name: toolcall.function.name,
-					content: JSON.stringify(toolop),
-				});
-
-				response = await ollama.chat({
-					model: "gpt-oss:120b-cloud",
-					stream: false,
-					think: false,
-					tools: chat_tools,
-					messages: message_histories[session_id],
-				});
-
-				message_histories[session_id]?.push(response.message);
-			}
-		}
-
-		console.log(JSON.stringify(response, null, 2));
-		console.log("Final content:", response.message.content);
-		console.log(message_histories[session_id]);
-		// Return the *final* message
-		return c.json(response.message);
+		return c.json(response);
 	} catch (error) {
 		console.error("Error in /chat endpoint:", error);
 		return c.json({ success: false, error: (error as Error).message }, 500);
 	}
 });
 
+io.on("connection", (socket) => {
+	socket.on("chat:post", async (message) => {
+		let session_id = "socket"; // remove hardcoding
+		const response = await chat({ message, message_history, chat_tools, session_id, system_prompt, tools });
+		socket.emit("chat:response", response);
+	});
+});
+
 console.log("Starting server on http://0.0.0.0:3000");
 Bun.serve({
 	port: 3000,
 	hostname: "0.0.0.0",
-	fetch: app.fetch,
+	idleTimeout: 30, // must be greater than the "pingInterval" option of the engine, which defaults to 25 seconds
+
+	fetch(req, server) {
+		const url = new URL(req.url);
+
+		if (url.pathname === "/socket.io/") {
+			return engine.handleRequest(req, server);
+		} else {
+			return app.fetch(req, server);
+		}
+	},
+
+	websocket,
 });
