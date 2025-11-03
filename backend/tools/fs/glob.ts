@@ -18,6 +18,7 @@ export default {
 			properties: {
 				filePath: { type: "string", description: "Glob Path to search via glob pattern." },
 			},
+			required:["filePath"]
 		},
 	},
 	execute: glob,
